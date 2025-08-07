@@ -2,6 +2,7 @@
 
 // PWA Install utilities
 let deferredPrompt: any = null;
+let installPromptShown = false;
 
 export const setupInstallPrompt = (): void => {
   // Listen for the beforeinstallprompt event
@@ -12,21 +13,36 @@ export const setupInstallPrompt = (): void => {
     // Stash the event so it can be triggered later
     deferredPrompt = e;
     
-    // Show install button or banner
-    showInstallBanner();
+    // Show install banner immediately and on every page visit
+    showInstallBanner(true);
   });
 
   // Listen for the app being installed
   window.addEventListener('appinstalled', () => {
     console.log('PWA was installed');
     deferredPrompt = null;
+    installPromptShown = false;
     hideInstallBanner();
   });
+
+  // Force show install prompt on every page load if conditions are met
+  setTimeout(() => {
+    checkAndShowInstallPrompt();
+  }, 1000); // Delay to ensure page is loaded
+};
+
+  // Don't show if already installed or running standalone
+  if (isStandalone()) return;
+  
+  // Always show the install banner on every page visit
+  // regardless of whether we have the beforeinstallprompt event
+  showInstallBanner(false);
 };
 
 export const triggerInstallPrompt = async (): Promise<boolean> => {
   if (!deferredPrompt) {
-    console.log('No install prompt available');
+    console.log('No native install prompt available, showing manual instructions');
+    showManualInstallInstructions();
     return false;
   }
 
@@ -43,8 +59,24 @@ export const triggerInstallPrompt = async (): Promise<boolean> => {
   return outcome === 'accepted';
 };
 
+const showManualInstallInstructions = (): void => {
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const isAndroid = /Android/.test(navigator.userAgent);
+  
+  let instructions = '';
+  if (isIOS) {
+    instructions = 'Tap the Share button and select "Add to Home Screen"';
+  } else if (isAndroid) {
+    instructions = 'Tap the menu (⋮) and select "Add to Home screen" or "Install app"';
+  } else {
+    instructions = 'Look for the install icon in your browser\'s address bar or menu';
+  }
+
+  alert(`To install Kachuful:\n\n${instructions}`);
+};
 export const isInstallable = (): boolean => {
-  return deferredPrompt !== null;
+  // Always return true if not standalone to show install options
+  return !isStandalone();
 };
 
 export const isStandalone = (): boolean => {
@@ -52,18 +84,15 @@ export const isStandalone = (): boolean => {
          (window.navigator as any).standalone === true;
 };
 
-const showInstallBanner = (): void => {
+const showInstallBanner = (hasNativePrompt: boolean = false): void => {
   // Don't show if already installed
   if (isStandalone()) return;
-  
-  // Check if banner already exists
-  if (document.getElementById('pwa-install-banner')) return;
 
   const banner = document.createElement('div');
   banner.id = 'pwa-install-banner';
   banner.style.cssText = `
     position: fixed;
-    bottom: 20px;
+    top: 70px;
     left: 20px;
     right: 20px;
     background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -73,16 +102,16 @@ const showInstallBanner = (): void => {
     box-shadow: 0 10px 25px rgba(16, 185, 129, 0.3);
     z-index: 9999;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    animation: slideUp 0.3s ease-out;
+    animation: slideDown 0.3s ease-out;
     max-width: 400px;
     margin: 0 auto;
   `;
 
   banner.innerHTML = `
     <style>
-      @keyframes slideUp {
+      @keyframes slideDown {
         from {
-          transform: translateY(100%);
+          transform: translateY(-100%);
           opacity: 0;
         }
         to {
@@ -90,12 +119,24 @@ const showInstallBanner = (): void => {
           opacity: 1;
         }
       }
+      @keyframes slideUp {
+        from {
+          transform: translateY(0);
+          opacity: 1;
+        }
+        to {
+          transform: translateY(-100%);
+          opacity: 0;
+        }
+      }
     </style>
     <div style="display: flex; align-items: center; gap: 1rem;">
       <div style="font-size: 2rem;">🃏</div>
       <div style="flex: 1;">
         <div style="font-weight: 600; margin-bottom: 0.25rem;">Install Kachuful</div>
-        <div style="font-size: 0.875rem; opacity: 0.9;">Add to your home screen for quick access</div>
+        <div style="font-size: 0.875rem; opacity: 0.9;">
+          ${hasNativePrompt ? 'Add to your home screen for quick access' : 'Get the full app experience - install now!'}
+        </div>
       </div>
       <div style="display: flex; gap: 0.5rem;">
         <button id="install-btn" style="
@@ -117,7 +158,7 @@ const showInstallBanner = (): void => {
           border-radius: 6px;
           cursor: pointer;
           font-size: 0.875rem;
-        ">Later</button>
+        ">Dismiss</button>
       </div>
     </div>
   `;
@@ -129,30 +170,28 @@ const showInstallBanner = (): void => {
   const dismissBtn = document.getElementById('dismiss-install-btn');
 
   installBtn?.addEventListener('click', async () => {
-    const installed = await triggerInstallPrompt();
-    if (installed) {
-      hideInstallBanner();
-    }
+    await triggerInstallPrompt();
+    hideInstallBanner();
   });
 
   dismissBtn?.addEventListener('click', () => {
     hideInstallBanner();
-    // Remember user dismissed for this session
-    sessionStorage.setItem('pwa-install-dismissed', 'true');
+    // Remember user dismissed for 5 minutes
+    sessionStorage.setItem('pwa-install-dismissed', Date.now().toString());
   });
 
-  // Auto-hide after 10 seconds
+  // Auto-hide after 15 seconds
   setTimeout(() => {
     if (document.getElementById('pwa-install-banner')) {
       hideInstallBanner();
     }
-  }, 10000);
+  }, 15000);
 };
 
 const hideInstallBanner = (): void => {
   const banner = document.getElementById('pwa-install-banner');
   if (banner) {
-    banner.style.animation = 'slideDown 0.3s ease-in forwards';
+    banner.style.animation = 'slideUp 0.3s ease-in forwards';
     setTimeout(() => {
       banner.remove();
     }, 300);
